@@ -82,7 +82,7 @@ func BucketPrefixObject(url string) (string, string, string, error) {
 	prefix := ""
 	obj := c[len(c)-1]
 	if len(c) > 2 {
-		prefix = filepath.Join(c[0 : len(c)-1]...)
+		prefix = filepath.Join(c[1 : len(c)-1]...)
 	}
 
 	return bkt, prefix, obj, nil

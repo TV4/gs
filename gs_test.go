@@ -21,6 +21,30 @@ var (
 	}
 )
 
+func TestBucketPrefixObject(t *testing.T) {
+	for _, tst := range []struct {
+		url  string
+		bkt  string
+		pf   string
+		name string
+	}{
+		{"gs://bkt/name", "bkt", "", "name"},
+		{"gs://bkt/pf/name", "bkt", "pf", "name"},
+		{"gs://bkt/pf1/pf2/name", "bkt", "pf1/pf2", "name"},
+	} {
+		bkt, pf, name, _ := BucketPrefixObject(tst.url)
+		if bkt != tst.bkt {
+			t.Errorf("expected %s, got %s", tst.bkt, bkt)
+		}
+		if pf != tst.pf {
+			t.Errorf("expected %s, got %s", tst.pf, pf)
+		}
+		if name != tst.name {
+			t.Errorf("expected %s, got %s", tst.name, name)
+		}
+	}
+}
+
 func TestObjectsBefore(t *testing.T) {
 	dt, _ := time.Parse("20060102", "20170103")
 	objs, err := ObjectsBefore(bkt, prefix, `testobj_(\d{8}).txt`, dt)
