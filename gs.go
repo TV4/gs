@@ -1,3 +1,7 @@
+// package gs contains convenience functions for dealing with Google Storage.
+//
+// It wraps the cloud.google.com/go/storage package and requires adequate
+// credentials to be installed.
 package gs
 
 import (
