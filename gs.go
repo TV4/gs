@@ -2,8 +2,11 @@ package gs
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"google.golang.org/api/iterator"
@@ -15,6 +18,71 @@ var (
 	timeout    = time.Second * 10
 	dateLayout = "20060102"
 )
+
+// ObjectReader returns a pointer to a storage.Reader for the object identified
+// by url (on the form `gs://path-to-object`).
+func ObjectReader(url string) (*storage.Reader, error) {
+	ctx, cancelf := context.WithTimeout(context.Background(), timeout)
+	defer cancelf()
+
+	c, err := storage.NewClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	bkt, pf, name, err := BucketPrefixObject(url)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.Bucket(bkt).Object(filepath.Join(pf, name)).NewReader(ctx)
+}
+
+// Has Object returns true if the object identified by url exists and false
+// if it does not.
+func HasObject(url string) (bool, error) {
+	ctx, cancelf := context.WithTimeout(context.Background(), timeout)
+	defer cancelf()
+
+	c, err := storage.NewClient(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	bkt, pf, name, err := BucketPrefixObject(url)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = c.Bucket(bkt).Object(filepath.Join(pf, name)).Attrs(ctx)
+	if err != nil {
+		if err == storage.ErrObjectNotExist {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
+}
+
+// BucketPrefixObject decomposes url into its bucket, prefix and name
+// components.
+func BucketPrefixObject(url string) (string, string, string, error) {
+	path := strings.TrimLeft(url, "gs://")
+	c := strings.Split(path, "/")
+	if len(c) < 2 {
+		return "", "", "", errors.New("path does not have bucket and object")
+	}
+
+	bkt := c[0]
+	prefix := ""
+	obj := c[len(c)-1]
+	if len(c) > 2 {
+		prefix = filepath.Join(c[0 : len(c)-1]...)
+	}
+
+	return bkt, prefix, obj, nil
+}
 
 // FilesSince returns all objects in a bucket with a given prefix and
 // matching a given date pattern, which corresponding date is matching
