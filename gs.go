@@ -7,11 +7,14 @@ package gs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/cemkalti/backoff"
 
 	"google.golang.org/api/iterator"
 
@@ -22,6 +25,111 @@ var (
 	timeout    = time.Second * 10
 	dateLayout = "20060102"
 )
+
+// WriteAndCompose writes 'data' to an object identified by 'url'. It does
+// this by first creating and writing to a temporary object, and then composing
+// the temporary object with the target object, creating the target object
+// if it does not exist. If the target object is being updated by another
+// process, the function will retry under exponential backoff, for no more
+// than 15 minutes.
+//
+// This can be handy when multiple processes are writing to the same file.
+func WriteAndCompose(data []byte, url string) error {
+	ctx, cancelf := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancelf()
+
+	bkt, pf, name, err := BucketPrefixObject(url)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(pf, name)
+
+	c, err := storage.NewClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Write to temp file
+	tmpPath, err := writeToTemp(c, bkt, path, data)
+	if err != nil {
+		return err
+	}
+
+	// Does the object yet exist?
+	obj := c.Bucket(bkt).Object(path)
+	if _, err := obj.Attrs(ctx); err != nil {
+		if err == storage.ErrObjectNotExist {
+			if err := obj.NewWriter(ctx).Close(); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
+	tmpObj := c.Bucket(bkt).Object(tmpPath)
+	op := func() error {
+		return compose(obj, tmpObj)
+	}
+
+	if err = backoff.Retry(op, backoff.NewExponentialBackOff()); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func writeToTemp(c *storage.Client, bkt, path string, data []byte) (string, error) {
+	ctx, cancelf := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancelf()
+
+	// Write to temp file
+	tempPath := fmt.Sprintf("%s.%d", path, time.Now().Nanosecond())
+	obj := c.Bucket(bkt).Object(tempPath)
+
+	w := obj.NewWriter(ctx)
+	n, err := w.Write(data)
+	if n < len(data) {
+		return "", errors.New("failed writing all data")
+	}
+	if err != nil {
+		return "", err
+	}
+
+	if err := w.Close(); err != nil {
+		return "", err
+	}
+
+	return tempPath, nil
+}
+
+func compose(obj, pobj *storage.ObjectHandle) error {
+	ctx, cancelf := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancelf()
+
+	attr, err := obj.Attrs(ctx)
+	if err != nil {
+		return backoff.Permanent(err)
+	}
+
+	pattr, err := pobj.Attrs(ctx)
+	if err != nil {
+		return backoff.Permanent(err)
+	}
+
+	cond := storage.Conditions{GenerationMatch: attr.Generation}
+	composer := obj.If(cond).ComposerFrom(pobj, obj)
+	composer.ContentType = pattr.ContentType
+	if attr, err = composer.Run(ctx); err != nil {
+		return err
+	}
+
+	if err = pobj.Delete(ctx); err != nil {
+		return backoff.Permanent(err)
+	}
+
+	return nil
+}
 
 // ObjectReader returns a pointer to a storage.Reader for the object identified
 // by url (on the form `gs://path-to-object`).
