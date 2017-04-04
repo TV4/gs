@@ -93,6 +93,7 @@ func (w *Writer) open() error {
 		var resp *raw.Object
 		err := applyConds("NewWriter", w.o.gen, w.o.conds, call)
 		if err == nil {
+			setClientHeader(call.Header())
 			resp, err = call.Do()
 		}
 		if err != nil {
@@ -120,7 +121,7 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 
 // Close completes the write operation and flushes any buffered data.
 // If Close doesn't return an error, metadata about the written object
-// can be retrieved by calling Object.
+// can be retrieved by calling Attrs.
 func (w *Writer) Close() error {
 	if !w.opened {
 		if err := w.open(); err != nil {
