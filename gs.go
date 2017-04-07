@@ -21,8 +21,8 @@ import (
 	"cloud.google.com/go/storage"
 )
 
-var (
-	timeout    = time.Second * 10
+const (
+	opTimeout  = time.Second * 30 // default timeout for all operations
 	dateLayout = "20060102"
 )
 
@@ -35,7 +35,7 @@ var (
 //
 // This can be handy when multiple processes are writing to the same file.
 func WriteAndCompose(data []byte, url string) error {
-	ctx, cancelf := context.WithTimeout(context.Background(), time.Second*30)
+	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
 	defer cancelf()
 
 	bkt, pf, name, err := BucketPrefixObject(url)
@@ -80,7 +80,7 @@ func WriteAndCompose(data []byte, url string) error {
 }
 
 func writeToTemp(c *storage.Client, bkt, path string, data []byte) (string, error) {
-	ctx, cancelf := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
 	defer cancelf()
 
 	// Write to temp file
@@ -104,7 +104,7 @@ func writeToTemp(c *storage.Client, bkt, path string, data []byte) (string, erro
 }
 
 func compose(obj, pobj *storage.ObjectHandle) error {
-	ctx, cancelf := context.WithTimeout(context.Background(), time.Second*30)
+	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
 	defer cancelf()
 
 	attr, err := obj.Attrs(ctx)
@@ -134,7 +134,7 @@ func compose(obj, pobj *storage.ObjectHandle) error {
 // ObjectReader returns a pointer to a storage.Reader for the object identified
 // by url (on the form `gs://path-to-object`).
 func ObjectReader(url string) (*storage.Reader, error) {
-	ctx, cancelf := context.WithTimeout(context.Background(), timeout)
+	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
 	defer cancelf()
 
 	c, err := storage.NewClient(ctx)
@@ -153,7 +153,7 @@ func ObjectReader(url string) (*storage.Reader, error) {
 // Has Object returns true if the object identified by url exists and false
 // if it does not.
 func HasObject(url string) (bool, error) {
-	ctx, cancelf := context.WithTimeout(context.Background(), timeout)
+	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
 	defer cancelf()
 
 	c, err := storage.NewClient(ctx)
@@ -221,7 +221,7 @@ func ObjectsBefore(bkt, prefix, pattern string, dt time.Time) ([]string, error) 
 }
 
 func filterObjects(bkt, prefix, pattern string, dt time.Time, cmp func(d1, d2 time.Time) bool) ([]string, error) {
-	ctx, cancelf := context.WithTimeout(context.Background(), timeout)
+	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
 	defer cancelf()
 
 	matcher, err := regexp.Compile(pattern)
