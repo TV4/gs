@@ -2,6 +2,7 @@ package gs
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,7 +20,50 @@ var (
 		"testobj_20170101.txt",
 		"testobj_20170104.txt",
 	}
+	text = `This is a test string`
 )
+
+func TestAppend(t *testing.T) {
+	name := "myfile.txt"
+	url := "gs://%s/%s"
+	url = fmt.Sprintf(url, bkt, filepath.Join(prefix, name))
+
+	a := Appender{Gzip: true}
+
+	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
+	defer cancelf()
+
+	err := a.Append(ctx, []byte(text), url)
+	if err != nil {
+		t.Error(err)
+	}
+
+	c, err := storage.NewClient(ctx)
+	if err != nil {
+		t.Error(err)
+	}
+
+	o := filepath.Join(prefix, name+".gz")
+	obj := c.Bucket(bkt).Object(o)
+	attr, err := obj.Attrs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attr == nil {
+		t.Fatal("object not found")
+	}
+	if attr.Name != o {
+		t.Fatal("unknown object found: ", attr.Name)
+	}
+
+	_, err = obj.NewReader(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	obj.Delete(ctx)
+
+}
 
 func TestBucketPrefixObject(t *testing.T) {
 	for _, tst := range []struct {
@@ -72,7 +116,7 @@ func TestObjectsSince(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	ctx, cancelf := context.WithTimeout(context.Background(), timeout)
+	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
 	defer cancelf()
 
 	c, err := storage.NewClient(ctx)

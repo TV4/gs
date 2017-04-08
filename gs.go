@@ -5,6 +5,8 @@
 package gs
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +28,11 @@ const (
 	dateLayout = "20060102"
 )
 
+type Appender struct {
+	MaxBackoff time.Duration
+	Gzip       bool
+}
+
 // WriteAndCompose writes 'data' to an object identified by 'url'. It does
 // this by first creating and writing to a temporary object, and then composing
 // the temporary object with the target object, creating the target object
@@ -34,29 +41,28 @@ const (
 // than 15 minutes.
 //
 // This can be handy when multiple processes are writing to the same file.
-func WriteAndCompose(data []byte, url string) error {
-	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
-	defer cancelf()
+func (a *Appender) Append(ctx context.Context, data []byte, url string) error {
+	if a.MaxBackoff == 0 {
+		a.MaxBackoff = time.Minute * 10
+	}
 
-	bkt, pf, name, err := BucketPrefixObject(url)
-	if err != nil {
+	var err error
+	if data, err = compress(data, a.Gzip); err != nil {
 		return err
 	}
-	path := filepath.Join(pf, name)
 
 	c, err := storage.NewClient(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Write to temp file
-	tmpPath, err := writeToTemp(c, bkt, path, data)
-	if err != nil {
+	tmpObj, obj, err := objects(c, url, a.Gzip)
+
+	if err := writeToObj(ctx, tmpObj, data); err != nil {
 		return err
 	}
 
 	// Does the object yet exist?
-	obj := c.Bucket(bkt).Object(path)
 	if _, err := obj.Attrs(ctx); err != nil {
 		if err == storage.ErrObjectNotExist {
 			if err := obj.NewWriter(ctx).Close(); err != nil {
@@ -67,9 +73,17 @@ func WriteAndCompose(data []byte, url string) error {
 		}
 	}
 
-	tmpObj := c.Bucket(bkt).Object(tmpPath)
+	if d, _ := ctx.Deadline(); d.Before(time.Now()) {
+		return errors.New("context has timed out")
+	}
+
+	bckoff := backoff.NewExponentialBackOff()
+	bckoff.MaxElapsedTime = a.MaxBackoff
+	ctx, cancelf := context.WithTimeout(context.Background(), a.MaxBackoff)
+	defer cancelf()
+
 	op := func() error {
-		return compose(obj, tmpObj)
+		return compose(ctx, obj, tmpObj)
 	}
 
 	if err = backoff.Retry(op, backoff.NewExponentialBackOff()); err != nil {
@@ -79,34 +93,55 @@ func WriteAndCompose(data []byte, url string) error {
 	return nil
 }
 
-func writeToTemp(c *storage.Client, bkt, path string, data []byte) (string, error) {
-	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
-	defer cancelf()
-
-	// Write to temp file
-	tempPath := fmt.Sprintf("%s.%d", path, time.Now().Nanosecond())
-	obj := c.Bucket(bkt).Object(tempPath)
-
-	w := obj.NewWriter(ctx)
-	n, err := w.Write(data)
-	if n < len(data) {
-		return "", errors.New("failed writing all data")
-	}
+func objects(c *storage.Client, url string, gzip bool) (*storage.ObjectHandle, *storage.ObjectHandle, error) {
+	bkt, pf, name, err := BucketPrefixObject(url)
 	if err != nil {
-		return "", err
+		return nil, nil, err
+	}
+	path := filepath.Join(pf, name)
+	tmpPath := fmt.Sprintf("%s.%d", path, time.Now().Nanosecond())
+
+	if gzip {
+		path = path + ".gz"
+		tmpPath = tmpPath + ".gz"
 	}
 
-	if err := w.Close(); err != nil {
-		return "", err
-	}
+	obj := c.Bucket(bkt).Object(path)
+	tmpObj := c.Bucket(bkt).Object(tmpPath)
 
-	return tempPath, nil
+	return tmpObj, obj, nil
 }
 
-func compose(obj, pobj *storage.ObjectHandle) error {
-	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
-	defer cancelf()
+func compress(data []byte, gz bool) ([]byte, error) {
+	if !gz {
+		return data, nil
+	}
 
+	var buf bytes.Buffer
+	z := gzip.NewWriter(&buf)
+	_, err := z.Write(data)
+	if err != nil {
+		return nil, err
+	}
+	z.Close()
+
+	return buf.Bytes(), nil
+}
+
+func writeToObj(ctx context.Context, obj *storage.ObjectHandle, data []byte) error {
+	w := obj.NewWriter(ctx)
+	_, err := w.Write(data)
+	if err != nil {
+		return err
+	}
+	if err = w.Close(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func compose(ctx context.Context, obj, pobj *storage.ObjectHandle) error {
 	attr, err := obj.Attrs(ctx)
 	if err != nil {
 		return backoff.Permanent(err)
@@ -119,7 +154,7 @@ func compose(obj, pobj *storage.ObjectHandle) error {
 
 	cond := storage.Conditions{GenerationMatch: attr.Generation}
 	composer := obj.If(cond).ComposerFrom(pobj, obj)
-	composer.ContentType = pattr.ContentType
+	composer.ContentEncoding = pattr.ContentEncoding
 	if attr, err = composer.Run(ctx); err != nil {
 		return err
 	}
