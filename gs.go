@@ -37,22 +37,22 @@ type Appender struct {
 // this by first creating and writing to a temporary object, and then composing
 // the temporary object with the target object, creating the target object
 // if it does not exist. If the target object is being updated by another
-// process, the function will retry under exponential backoff, for no more
-// than 15 minutes.
+// process, the function will retry under exponential backoff, for no longer
+// than MaxBackoff, or 10 minutes if MaxBackoff is zero.
 //
 // This can be handy when multiple processes are writing to the same file.
 func (a *Appender) Append(ctx context.Context, data []byte, url string) error {
-	if a.MaxBackoff == 0 {
-		a.MaxBackoff = time.Minute * 10
-	}
-
-	var err error
-	if data, err = compress(data, a.Gzip); err != nil {
-		return err
+	maxBackoff := a.MaxBackoff
+	if maxBackoff == 0 {
+		maxBackoff = time.Minute * 10
 	}
 
 	c, err := storage.NewClient(ctx)
 	if err != nil {
+		return err
+	}
+
+	if data, err = compress(data, a.Gzip); err != nil {
 		return err
 	}
 
@@ -78,19 +78,15 @@ func (a *Appender) Append(ctx context.Context, data []byte, url string) error {
 	}
 
 	bckoff := backoff.NewExponentialBackOff()
-	bckoff.MaxElapsedTime = a.MaxBackoff
-	ctx, cancelf := context.WithTimeout(context.Background(), a.MaxBackoff)
+	bckoff.MaxElapsedTime = maxBackoff
+	ctx, cancelf := context.WithTimeout(context.Background(), maxBackoff)
 	defer cancelf()
 
 	op := func() error {
 		return compose(ctx, obj, tmpObj)
 	}
 
-	if err = backoff.Retry(op, backoff.NewExponentialBackOff()); err != nil {
-		return err
-	}
-
-	return nil
+	return backoff.Retry(op, backoff.NewExponentialBackOff())
 }
 
 func objects(c *storage.Client, url string, gzip bool) (*storage.ObjectHandle, *storage.ObjectHandle, error) {
