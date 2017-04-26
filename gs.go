@@ -1,4 +1,4 @@
-// package gs contains convenience functions for dealing with Google Storage.
+// Package gs contains convenience functions for dealing with Google Storage.
 //
 // It wraps the cloud.google.com/go/storage package and requires adequate
 // credentials to be installed.
@@ -28,12 +28,13 @@ const (
 	dateLayout = "20060102"
 )
 
+// Appender enables distributed writing to a single object on google storage.
 type Appender struct {
 	MaxBackoff time.Duration
 	Gzip       bool
 }
 
-// WriteAndCompose writes 'data' to an object identified by 'url'. It does
+// Append writes 'data' to an object identified by 'url'. It does
 // this by first creating and writing to a temporary object, and then composing
 // the temporary object with the target object, creating the target object
 // if it does not exist. If the target object is being updated by another
@@ -181,7 +182,7 @@ func ObjectReader(url string) (*storage.Reader, error) {
 	return c.Bucket(bkt).Object(filepath.Join(pf, name)).NewReader(ctx)
 }
 
-// Has Object returns true if the object identified by url exists and false
+// HasObject returns true if the object identified by url exists and false
 // if it does not.
 func HasObject(url string) (bool, error) {
 	ctx, cancelf := context.WithTimeout(context.Background(), opTimeout)
@@ -227,7 +228,7 @@ func BucketPrefixObject(url string) (string, string, string, error) {
 	return bkt, prefix, obj, nil
 }
 
-// FilesSince returns all objects in a bucket with a given prefix and
+// ObjectsSince returns all objects in a bucket with a given prefix and
 // matching a given date pattern, which corresponding date is matching
 // or after the given dt. The objects are returned in date order,
 // according to their file names.
@@ -239,7 +240,7 @@ func ObjectsSince(bkt, prefix, pattern string, dt time.Time) ([]string, error) {
 	return filterObjects(bkt, prefix, pattern, dt, cmp)
 }
 
-// FilesBefore returns all objects in a bucket with a given prefix and
+// ObjectsBefore returns all objects in a bucket with a given prefix and
 // matching a given date pattern, which corresponding date is before
 // (not including) the given dt. The objects are returned in date order,
 // according to their file names.
