@@ -212,7 +212,7 @@ func HasObject(url string) (bool, error) {
 // BucketPrefixObject decomposes url into its bucket, prefix and name
 // components.
 func BucketPrefixObject(url string) (string, string, string, error) {
-	path := strings.TrimLeft(url, "gs://")
+	path := strings.TrimPrefix(url, "gs://")
 	c := strings.Split(path, "/")
 	if len(c) < 2 {
 		return "", "", "", errors.New("path does not have bucket and object")
