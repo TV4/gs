@@ -16,11 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cemkalti/backoff"
-
-	"google.golang.org/api/iterator"
-
 	"cloud.google.com/go/storage"
+	"github.com/cenkalti/backoff"
+	"google.golang.org/api/iterator"
 )
 
 const (
